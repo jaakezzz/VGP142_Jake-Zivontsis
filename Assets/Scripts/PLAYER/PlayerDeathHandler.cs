@@ -10,7 +10,7 @@ public class PlayerDeathHandler : MonoBehaviour
 
     [Header("Animation")]
     public Animator anim;                    // (optional) reference to wolf child Animator
-    [Tooltip("Seconds to show the death animation before GM respawn starts")]
+    [Tooltip("Seconds to show the death animation before GM decides (respawn or game over).")]
     public float deathAnimDuration = 1.0f;
 
     Collider[] colliders;
@@ -43,8 +43,6 @@ public class PlayerDeathHandler : MonoBehaviour
         if (isDead) return;
         isDead = true;
 
-        //Debug.Log("[PDH] OnDied at " + Time.time);
-
         // Stop control/collisions but KEEP renderers visible for death anim
         if (cc) cc.enabled = false;
         if (rb)
@@ -56,37 +54,22 @@ public class PlayerDeathHandler : MonoBehaviour
         foreach (var c in colliders) if (c) c.enabled = false;
         foreach (var s in controlScripts) if (s) s.enabled = false;
 
-        // Fire the Animator trigger via the bridge (preferred)
+        // Prefer the bridge trigger; fallback to direct trigger
         var bridge = GetComponent<WolfAnimatorBridge>();
-        if (bridge != null)
-        {
-            //Debug.Log($"[PDH] Triggering Die via WolfAnimatorBridge for {deathAnimDuration}s");
-            bridge.TriggerDie();
-        }
-        else if (anim && anim.runtimeAnimatorController)
-        {
-            // Fallback: call trigger directly if bridge not present
-            Debug.Log($"[PDH] Triggering Die on Animator directly for {deathAnimDuration}s");
-            anim.SetTrigger("Die");
-        }
-        else
-        {
-            Debug.LogWarning("[PDH] No WolfAnimatorBridge or valid Animator found to play death animation.");
-        }
+        if (bridge != null) bridge.TriggerDie();
+        else if (anim && anim.runtimeAnimatorController) anim.SetTrigger("Die");
 
-        // Wait so the death anim is visible, then let GM handle respawn timing/position/HP
+        // After the short death anim delay, let GameManager decide (lives -> respawn or game over)
         StartCoroutine(NotifyGMAfter(deathAnimDuration));
     }
 
     IEnumerator NotifyGMAfter(float delay)
     {
-        //Debug.Log("[PDH] Waiting " + delay + "s before notifying GM");
         yield return new WaitForSecondsRealtime(delay);
-        //Debug.Log("[PDH] Now calling GM.OnPlayerDied");
         GameManager.I.OnPlayerDied();
     }
 
-    // Called by GameManager right before showing the player again
+    // Called by GameManager before showing the player again
     public void SetDeadState(bool dead)
     {
         isDead = dead;
@@ -98,7 +81,6 @@ public class PlayerDeathHandler : MonoBehaviour
 
         if (!dead && anim && anim.runtimeAnimatorController)
         {
-            // Clear any stale state and return to locomotion cleanly
             anim.Rebind();
             anim.Update(0f);
         }

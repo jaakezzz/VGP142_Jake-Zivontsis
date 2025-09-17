@@ -18,26 +18,48 @@ public class PlayerMotor : MonoBehaviour
     public float gravity = -20f;       // negative
     public float jumpForce = 6f;
     public Transform cam;
+    public Vector3 externalImpulse;
 
     [Header("Jump Reliability")]
     public float coyoteTime = 0.12f;   // still jump shortly after leaving ground
     public float jumpBuffer = 0.12f;   // accept jump slightly before landing
 
+    // --- Attacks ---
+    [Header("Attacks")]
+    public Animator animator;                 // drag the wolf Animator here (or auto-found)
+    public string attack1Trigger = "Attack1";
+    public string attack2Trigger = "Attack2";
+    public KeyCode attack1Key = KeyCode.Mouse0;
+    public KeyCode attack2Key = KeyCode.Mouse1;
+
+    [Tooltip("Temporarily lock movement during attack (optional).")]
+    public bool lockMoveDuringAttack = false;
+    public float attack1LockTime = 0.35f;
+    public float attack2LockTime = 0.45f;
+
     CharacterController cc;
     float vertVel;
     bool stunned;
+    bool attackLocked;                 // internal lock while swinging
     float coyoteTimer;
     float bufferTimer;
     int ignoreGroundedFrames;          // prevents slope from canceling jump
 
-    void Awake() { cc = GetComponent<CharacterController>(); }
+    void Awake()
+    {
+        cc = GetComponent<CharacterController>();
+        if (!animator) animator = GetComponentInChildren<Animator>();
+    }
 
     void Update()
     {
         float dt = Time.deltaTime;
 
-        // --- Hard locks (stun or external lock e.g. Sit/BearTrap) ---
-        if (stunned || externalLock)
+        // --- Handle attack input even when moving ---
+        HandleAttackInput();
+
+        // --- Hard locks (stun, external lock, or attack lock) ---
+        if (stunned || externalLock || attackLocked)
         {
             // keep controller grounded so we don’t hover on slopes
             if (cc && !cc.isGrounded)
@@ -79,7 +101,44 @@ public class PlayerMotor : MonoBehaviour
         Vector3 velocity = moveXZ;
         velocity.y = vertVel;
 
+        // add impulses (decay over time)
+        if (externalImpulse.sqrMagnitude > 0.01f)
+        {
+            velocity += externalImpulse;
+            externalImpulse = Vector3.Lerp(externalImpulse, Vector3.zero, 5f * dt); // smooth decay
+        }
+
         cc.Move(velocity * dt);
+    }
+
+    // --- Attacks ---
+    void HandleAttackInput()
+    {
+        if (Input.GetKeyDown(attack1Key))
+            DoAttack(attack1Trigger, attack1LockTime);
+
+        if (Input.GetKeyDown(attack2Key))
+            DoAttack(attack2Trigger, attack2LockTime);
+    }
+
+    void DoAttack(string triggerName, float lockTime)
+    {
+        if (stunned || externalLock || attackLocked) return;
+
+        if (animator && !string.IsNullOrEmpty(triggerName))
+            animator.SetTrigger(triggerName);
+
+        if (lockMoveDuringAttack && lockTime > 0f)
+            StartCoroutine(AttackLock(lockTime));
+    }
+
+    IEnumerator AttackLock(float t)
+    {
+        attackLocked = true;
+        // Also cancel any jump buffer during the lock to avoid instant jump after
+        bufferTimer = 0f;
+        yield return new WaitForSeconds(t);
+        attackLocked = false;
     }
 
     public void Stun(float duration)
@@ -92,5 +151,10 @@ public class PlayerMotor : MonoBehaviour
         stunned = true;
         yield return new WaitForSeconds(duration);
         stunned = false;
+    }
+
+    public void ApplyExternalImpulse(Vector3 impulse)
+    {
+        externalImpulse += impulse;
     }
 }
