@@ -17555,8 +17555,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   groundStick: 3
-  runUnlocked: 1
-  jumpUnlocked: 1
+  runUnlocked: 0
+  jumpUnlocked: 0
   startWithRunToggled: 0
   walkSpeed: 4
   runSpeed: 6
