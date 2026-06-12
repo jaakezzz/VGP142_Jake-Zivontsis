@@ -122,7 +122,9 @@ public class ChaserEnemyAI : MonoBehaviour
 
         // Observer Pattern: Instead of checking health every frame, we "subscribe" to the 
         // death event. When Health reaches 0, it automatically calls our OnDied() function.
+        // Also subscribe to the onHurt event to react to taking damage to enable state swaps on hit.
         health.onDeath.AddListener(OnDied);
+        health.onHurt.AddListener(OnHurt);
 
         // Record the spawn location to establish the exact center of the Area of Interest
         homePos = transform.position;
@@ -142,7 +144,11 @@ public class ChaserEnemyAI : MonoBehaviour
     {
         // Memory Management: Always unsubscribe from events when the object is destroyed 
         // to prevent null reference errors and memory leaks.
-        if (health) health.onDeath.RemoveListener(OnDied);
+        if (health)
+        {
+            health.onDeath.RemoveListener(OnDied);
+            health.onHurt.RemoveListener(OnHurt);
+        }
     }
 
     void OnEnable()
@@ -337,6 +343,32 @@ public class ChaserEnemyAI : MonoBehaviour
         // If the line hit absolutely nothing, the view is clear
         if (debugVision) Debug.DrawLine(eye, target, Color.green, 0.05f);
         return true;
+    }
+
+    // -----------------------------------------------------------------------------
+    // Damage Handling (The "Sixth Sense" Reaction)
+    // -----------------------------------------------------------------------------
+    void OnHurt()
+    {
+        // Death Gate
+        if (isDead) return;
+
+        // Force the FSM into the Chase state immediately
+        state = State.Chase;
+
+        // Max out the memory timer. This makes the AI "think" it just saw you, withohut line of sight.
+        lastSeenTime = Time.time;
+
+        // Interrupt the AI if it was currently standing still at a patrol waypoint
+        StopWait();
+
+        // Immediately command the NavMesh to spin around and path to the player
+        if (agent && player)
+        {
+            agent.isStopped = false;
+            agent.speed = chaseSpeed;
+            agent.SetDestination(player.position);
+        }
     }
 
     // -----------------------------------------------------------------------------

@@ -15,8 +15,8 @@ public class PlayerMotor : MonoBehaviour
 
     // --- Ability unlocks ---
     [Header("Ability Unlocks")]
-    public bool runUnlocked = true;          // gate for running
-    public bool jumpUnlocked = true;         // gate for jumping
+    public bool runUnlocked = false;          // gate for running
+    public bool jumpUnlocked = false;         // gate for jumping
     public bool startWithRunToggled = false; // only used if holdToRun = false
 
     // --- Movement ---
@@ -55,6 +55,14 @@ public class PlayerMotor : MonoBehaviour
     public float attack1LockTime = 0.35f;
     public float attack2LockTime = 0.45f;
 
+    [Header("Attack Lunges")]
+    public float attack1LungeDelay = 0.25f;       // Time before the lunge triggers
+    public float attack2LungeDelay = 0.4f;       // Time before the lunge triggers
+    public float attack1LungeForce = 6.6f;   // Forward push
+    public float attack2LungeForce = 12f;  // Forward push
+    public float attack1UpwardForce = 3f;    // Slight lift off the ground
+    public float attack2UpwardForce = 5f;    // Slight lift off the ground
+
     CharacterController cc;
     float vertVel;
     bool stunned;
@@ -89,36 +97,36 @@ public class PlayerMotor : MonoBehaviour
         float dt = Time.deltaTime;
 
         // --- Run input (compute 'speed' BEFORE using it) ---
-        if (!runUnlocked)
-        {
-            speed = walkSpeed;
-        }
-        else if (holdToRun)
-        {
-            speed = Input.GetKey(runKey) ? runSpeed : walkSpeed;
-        }
+        if (!runUnlocked) speed = walkSpeed;
+        else if (holdToRun) speed = Input.GetKey(runKey) ? runSpeed : walkSpeed;
         else
         {
             if (Input.GetKeyDown(runKey)) runToggled = !runToggled;
             speed = runToggled ? runSpeed : walkSpeed;
         }
 
-        // --- Handle attack input even when moving ---
+        // --- Handle attack input ---
         HandleAttackInput();
 
-        // --- Hard locks (stun, external lock, or attack lock) ---
-        if (stunned || externalLock || attackLocked)
-        {
-            if (cc && !cc.isGrounded)
-                cc.Move(Vector3.down * groundStick * dt);
-            return; // <-- no animator driving here
-        }
+        Vector3 moveXZ = Vector3.zero;
 
-        // ---- Input (WASD relative to camera)
-        Vector3 fwd = cam ? Vector3.ProjectOnPlane(cam.forward, Vector3.up).normalized : transform.forward;
-        Vector3 right = cam ? cam.right : transform.right;
-        Vector2 in2 = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
-        Vector3 moveXZ = (right * in2.x + fwd * in2.y).normalized * speed;
+        // Only allow WASD input if we are NOT locked
+        if (!stunned && !externalLock && !attackLocked)
+        {
+            // ---- Input (WASD relative to camera)
+            Vector3 fwd = cam ? Vector3.ProjectOnPlane(cam.forward, Vector3.up).normalized : transform.forward;
+            Vector3 right = cam ? cam.right : transform.right;
+            Vector2 in2 = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+            moveXZ = (right * in2.x + fwd * in2.y).normalized * speed;
+
+            // Buffer jump input (requires ability + temporary enable)
+            if (jumpUnlocked && jumpEnabled && Input.GetButtonDown("Jump")) bufferTimer = jumpBuffer;
+            else bufferTimer -= dt;
+        }
+        else
+        {
+            bufferTimer -= dt; // Still decay the jump buffer even if locked
+        }
 
         // ---- Grounded check with short grace period
         bool grounded = cc.isGrounded;
@@ -127,12 +135,8 @@ public class PlayerMotor : MonoBehaviour
         if (grounded) coyoteTimer = coyoteTime;
         else coyoteTimer -= dt;
 
-        // Buffer jump input (requires ability + temporary enable)
-        if (jumpUnlocked && jumpEnabled && Input.GetButtonDown("Jump")) bufferTimer = jumpBuffer;
-        else bufferTimer -= dt;
-
         // Apply buffered / coyote jump (only if unlocked + enabled)
-        if (jumpUnlocked && jumpEnabled && bufferTimer > 0f && coyoteTimer > 0f)
+        if (!stunned && !externalLock && !attackLocked && jumpUnlocked && jumpEnabled && bufferTimer > 0f && coyoteTimer > 0f)
         {
             vertVel = jumpForce;
             bufferTimer = 0f;
@@ -161,6 +165,7 @@ public class PlayerMotor : MonoBehaviour
         // Keep your blend tree driven by whatever *else* you want (e.g., separate component).
     }
 
+
     // --- Attacks ---
     void HandleAttackInput()
     {
@@ -188,16 +193,40 @@ public class PlayerMotor : MonoBehaviour
             {
                 melee.TriggerAttack1();
                 GetComponent<PlayerAudio>()?.PlayAttack1();
+                StartCoroutine(LungeRoutine(attack1LungeDelay, attack1LungeForce, attack1UpwardForce));
             }
             else if (triggerName == attack2Trigger)
             {
                 melee.TriggerAttack2();
                 GetComponent<PlayerAudio>()?.PlayAttack2();
+                StartCoroutine(LungeRoutine(attack2LungeDelay, attack2LungeForce, attack2UpwardForce));
             }
         }
 
         if (lockMoveDuringAttack && lockTime > 0f)
             StartCoroutine(AttackLock(lockTime));
+    }
+
+    IEnumerator LungeRoutine(float delay, float forwardForce, float upwardForce)
+    {
+        yield return new WaitForSeconds(delay);
+
+        // Cancel the lunge if the player died or got stunned during the windup
+        if (stunned || externalLock) yield break;
+
+        var faceAlign = GetComponent<ModelGroundAlignAndFace>();
+        Vector3 lungeDir = (faceAlign != null && faceAlign.model != null) ? faceAlign.model.forward : transform.forward;
+
+        // Apply the forward momentum to the external impulse system
+        Vector3 impulse = lungeDir * forwardForce;
+        ApplyExternalImpulse(impulse);
+
+        // Apply the upward force directly to the gravity tracking
+        if (upwardForce > 0f)
+        {
+            vertVel = upwardForce;
+            ignoreGroundedFrames = 2;
+        }
     }
 
     IEnumerator AttackLock(float t)

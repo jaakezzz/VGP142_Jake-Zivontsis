@@ -37,6 +37,12 @@ public class SettingsManager : MonoBehaviour
         // 1. Keep the shield UP while we load
         isInitializing = true;
 
+        // --- Overwrite the Inspector's FPS clone with the persistent one in the scene
+        if (PersistentUI.instance != null)
+        {
+            fpsCounterObject = PersistentUI.instance.gameObject;
+        }
+
         SetupResolutionDropdown();
         LoadSettings();
 
